@@ -75,24 +75,33 @@ coverage when introducing one `./kotlin` entry point. [Hive Mind guide](https://
   Maven, Gradle verification entries and npm in the same scanner. [OSV input formats](https://google.github.io/osv-scanner/supported-languages-and-lockfiles/), [scan inventory](sources/dependency-audit.md).
 - **Publication.** GitHub Releases provide an out-of-the-box file distribution
   with the repository token. Maven Central offers consumer coordinates and
-  signed artifacts after namespace and token setup. Its documented Publisher
-  API separates staging, approval and public availability. Using a receipt
-  allows recovery across runner restarts, and anonymous verification checks
-  what a consumer sees. [Portal API](https://central.sonatype.org/publish/publish-portal-api/), [Central namespaces](https://central.sonatype.org/register/namespace/).
+  signed artifacts after namespace and token setup. JReleaser and GradleUp's
+  NMCP can upload Gradle publications. Using the Portal API directly keeps the
+  deployment ID on the GitHub draft and lets the workflow resume that
+  deployment across runner restarts. Anonymous checks observe the published
+  coordinates. [Portal API](https://central.sonatype.org/publish/publish-portal-api/), [Gradle integrations](https://central.sonatype.org/publish/publish-portal-gradle/), [Central namespaces](https://central.sonatype.org/register/namespace/).
 - **Container releases.** The staged JVM bytecode and dependencies are
   architecture-independent. Native amd64 and arm64 runners can verify both
   platform images against the same runtime bytes without recompiling Kotlin in
   Docker. GHCR is an optional mirror with public visibility controlled by its
   package settings. [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
-## Rollout
+## Verification and adoption
 
-1. Verify local compilation, tests, packaging, metadata retry behavior, audit
-   and scoped routing. Run the complete hosted PR checks, including the two
-   native image smoke tests, against the final head.
-2. After the template is ready, file both adoption issues with the template PR
-   and acceptance checks. UI owns the migration of its existing Kotlin builds
-   and Hive Mind owns its docs and language detection.
-3. A merged copy can exercise the live GitHub Release. Maven Central and GHCR
-   can be verified in a release-enabled repository with the documented
-   publisher credentials, namespace and package visibility.
+- The hosted pipeline passed release preview, workflow linting, JVM and JS
+  tests, Maven staging, documentation and dependency checks, and native
+  amd64 and arm64 smoke tests. The first clean-runner attempts exposed two
+  official plugin-marker POMs with different hashes on the Gradle Plugin
+  Portal and Maven Central; both sources were checked and pinned. The PR
+  carries the checks for the final revision. [Hosted run](https://github.com/link-foundation/kotlin-ai-driven-development-pipeline-template/actions/runs/44697437139), [template PR](https://github.com/link-foundation/kotlin-ai-driven-development-pipeline-template/pull/2).
+- The pipeline regression suite exercises Kotlin path selection, release
+  metadata pushes and crash recovery in local Git repositories. The separate
+  signing experiment builds and verifies the common, JVM and JS publications
+  with a fresh disposable PGP key. [Regression suite](../../../tests/test_pipeline.py), [signing experiment](../../../experiments/verify-signed-bundle.sh).
+- The adoption reports request updates to the Hive Mind documentation and
+  language detection, and a UI pilot that preserves its existing target and
+  shared-fixture coverage from `./kotlin`. [Hive Mind issue #4098](https://github.com/link-assistant/hive-mind/issues/4098), [UI issue #265](https://github.com/link-foundation/ui/issues/265).
+- The live GitHub Release requires a run from `main`. The external mirrors
+  require a registered Central namespace and publisher credentials or a GHCR
+  package with public visibility. The pull request verifies the release plan
+  and local artifacts. [Release setup and recovery](../../releases.md).

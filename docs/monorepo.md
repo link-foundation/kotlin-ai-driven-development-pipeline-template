@@ -8,8 +8,9 @@
    `scripts/` and pipeline tests under `kotlin/`, then adapt the
    [caller](../examples/monorepo/kotlin.yml).
 3. Override `fast-tasks` and `test-tasks` to match the enabled Gradle targets.
-   Add exact paths for shared build inputs and fixture directories to
-   `additional-paths`. Paths are relative to the repository root, one per line.
+   Add exact paths for included builds outside `kotlin/`, shared build inputs,
+   and fixture directories to `additional-paths`. Paths are relative to the
+   repository root, one per line.
 4. Require the caller's **quality / Pipeline Status** check. Keep native, iOS,
    Android, Wasm or other target jobs that need a different SDK or runner in the
    caller and include them in the repository's required checks.

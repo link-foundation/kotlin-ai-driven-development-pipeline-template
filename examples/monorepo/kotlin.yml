@@ -16,8 +16,12 @@ jobs:
     with:
       project-directory: kotlin
       additional-paths: |
+        native/kotlin/links-notation
+        packages/ui-kotlin
+        examples/kotlin
         native/parity
         docs/spec
         packages/ui-tokens/tests/golden
+        docs/case-studies/issue-1/samples
       fast-tasks: ktlintCheck detekt compileTestKotlinJvm compileTestKotlinJs
       test-tasks: jvmTest jsNodeTest
