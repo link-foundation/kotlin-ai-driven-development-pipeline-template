@@ -257,7 +257,8 @@ jobs:
           read -r -a tasks <<< "$TASKS"
           if [[ $VERSIONING == true ]]; then tasks+=(publishAllPublicationsToBundleRepository); fi
           if [[ $CONTAINER == true ]]; then tasks+=(stageRuntime); fi
-          ./gradlew --no-daemon --console=plain "${tasks[@]}"
+          mkdir -p build/pipeline
+          ./gradlew --no-daemon --console=plain "${tasks[@]}" 2>&1 | tee build/pipeline/gradle.log
           git diff --exit-code -- ':(glob)**/gradle.lockfile' ':(glob)**/kotlin-js-store/*'
       - name: Upload test and compiler reports
         if: ${{ !cancelled() }}
@@ -265,6 +266,7 @@ jobs:
         with:
           name: kotlin-test-reports-${{ github.run_attempt }}
           path: |
+            ${{ inputs.project-directory }}/build/pipeline/gradle.log
             ${{ inputs.project-directory }}/**/build/test-results/**/*.xml
             ${{ inputs.project-directory }}/**/build/reports/problems/*
           retention-days: 7

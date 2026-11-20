@@ -102,6 +102,34 @@ class GitPolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "beyond release metadata"):
             release.verify_metadata_commit(head, release.git_text("rev-parse", "HEAD"))
 
+    def test_metadata_push_and_tag_are_atomic_in_a_real_git_repository(self):
+        with tempfile.TemporaryDirectory() as remote:
+            ci.git("init", "--bare", remote)
+            ci.git("remote", "add", "origin", remote)
+            ci.git("push", "origin", "main")
+            self.assertTrue(release.push("main", "v0.1.0"))
+            tag = ci.git("--git-dir", remote, "rev-parse", "refs/tags/v0.1.0").stdout.decode().strip()
+            self.assertEqual(tag, self.base)
+
+    def test_pending_recovery_survives_a_crash_after_metadata_push(self):
+        with tempfile.TemporaryDirectory() as remote:
+            ci.git("init", "--bare", remote)
+            ci.git("remote", "add", "origin", remote)
+            Path("gradle.properties").write_text("group=fixture\nversion=0.0.0\n")
+            Path(".changeset/first.md").write_text("---\nbump: minor\n---\n\nFirst release.\n")
+            self.commit("prepared first release")
+            ci.git("push", "origin", "main")
+            with patch.object(release, "complete", side_effect=RuntimeError("crashed")):
+                with self.assertRaisesRegex(RuntimeError, "crashed"):
+                    release.run_release("main", None)
+            head = release.git_text("rev-parse", "HEAD")
+            self.assertEqual(release.git_text("rev-parse", "origin/main"), head)
+            self.assertEqual(release.git_text("--git-dir", remote, "rev-parse", "refs/tags/v0.1.0"), head)
+            with patch.object(release, "needs_recovery", return_value=True), patch.object(release, "complete") as finish:
+                release.run_release("main", None)
+                finish.assert_called_once_with("v0.1.0", head, None)
+            self.assertEqual(release.git_text("rev-parse", "HEAD"), head)
+
     def test_lost_race_is_distinct_from_rule_refusal(self):
         response = subprocess.CompletedProcess([], 1, b"", b"! [rejected] (non-fast-forward)")
         with patch.object(release, "git", return_value=response):

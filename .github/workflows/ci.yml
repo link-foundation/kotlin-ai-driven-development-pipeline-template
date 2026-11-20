@@ -56,7 +56,8 @@ jobs:
       !cancelled() && (needs.release-preflight.result == 'success' || needs.release-preflight.result == 'skipped')
     permissions:
       contents: read
-    uses: ./.github/workflows/kotlin-quality.yml
+    # Use the same-commit call syntax supported by actionlint 1.7.12.
+    uses: ./.github/workflows/kotlin-quality.yml # zizmor: ignore[self-repository]
     with:
       versioning: true
       build-docker: true

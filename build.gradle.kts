@@ -75,10 +75,11 @@ detekt {
     source.setFrom(files("src", "examples"))
 }
 
-val javadocJar = tasks.register<Jar>("javadocJar") {
-    archiveClassifier.set("javadoc")
-    from("README.md")
-}
+val javadocJar =
+    tasks.register<Jar>("javadocJar") {
+        archiveClassifier.set("javadoc")
+        from("README.md")
+    }
 
 publishing {
     publications.withType<MavenPublication>().configureEach {

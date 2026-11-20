@@ -11,7 +11,7 @@ import sys
 
 VERSION = re.compile(r"^version=(\d+)\.(\d+)\.(\d+)$", re.MULTILINE)
 BUMP = re.compile(r"\A---\nbump: (patch|minor|major)\n---\n+(.+)\Z", re.DOTALL)
-CODE_SUFFIXES = {".kt", ".kts", ".java", ".gradle", ".py", ".sh", ".yml", ".yaml"}
+CODE_SUFFIXES = {".kt", ".kts", ".java", ".gradle", ".groovy", ".py", ".sh", ".bat", ".yml", ".yaml"}
 BUILD_FILES = {
     "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
     "gradle.properties", "gradlew", "gradlew.bat", "gradle.lockfile",
@@ -106,8 +106,9 @@ def check_metadata(project, base, production, gradle_versioning):
     if not gradle_versioning:
         return
     properties = project / "gradle.properties"
+    current = version(Path(properties).read_text(encoding="utf-8"))
     old = git("show", f"{base}:{properties}", check=False)
-    if old.returncode == 0 and version(old.stdout.decode()) != version(Path(properties).read_text(encoding="utf-8")):
+    if old.returncode == 0 and version(old.stdout.decode()) != current:
         raise ValueError(f"Only the release workflow may change version in {properties}")
     changesets = project / ".changeset"
     additions = []
@@ -160,7 +161,7 @@ def check_files(args):
             continue
         if path.suffix.lower() == ".md":
             limit = 2500
-        elif path.suffix.lower() in CODE_SUFFIXES or path.name == "Dockerfile":
+        elif path.suffix.lower() in CODE_SUFFIXES or path.name in {"Dockerfile", "gradlew"}:
             limit = 1500
         else:
             continue
