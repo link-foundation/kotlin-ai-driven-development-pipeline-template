@@ -1,0 +1,266 @@
+name: Kotlin pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Run checks or release pending changes on main.
+        type: choice
+        options: [check, release]
+        required: true
+        default: check
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release-preflight:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'release'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    concurrency:
+      group: main-writer-${{ github.repository }}-main
+      cancel-in-progress: false
+    outputs:
+      needed: ${{ steps.check.outputs.needed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Check release state and publishing credentials
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_CENTRAL: ${{ vars.PUBLISH_CENTRAL == 'true' }}
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: python3 scripts/release.py preflight
+
+  quality:
+    needs: release-preflight
+    if: >-
+      !cancelled() && (needs.release-preflight.result == 'success' || needs.release-preflight.result == 'skipped')
+    permissions:
+      contents: read
+    # Use the same-commit call syntax supported by actionlint 1.7.12.
+    uses: ./.github/workflows/kotlin-quality.yml # zizmor: ignore[self-repository]
+    with:
+      versioning: true
+      build-docker: true
+      force-checks: ${{ needs.release-preflight.outputs.needed == 'true' }}
+
+  preview:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'check')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: check-${{ github.workflow }}-${{ github.ref }}-preview
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - run: python3 scripts/release.py preview
+      - name: Explain credential handling
+        env:
+          PUBLISH_CENTRAL: ${{ vars.PUBLISH_CENTRAL == 'true' }}
+          PUBLISH_GHCR: ${{ vars.PUBLISH_GHCR == 'true' }}
+        run: |
+          if [[ $PUBLISH_CENTRAL == true || $PUBLISH_GHCR == true ]]; then
+            echo '::warning::External publishing credentials are probed only in a release run on main.'
+          else
+            echo '::notice::GitHub Releases are enabled. Maven Central and GHCR can be configured in repository variables.'
+          fi
+
+  release:
+    needs: [release-preflight, quality]
+    if: >-
+      !cancelled() && needs.release-preflight.result == 'success' && needs.quality.result == 'success' &&
+      (needs.release-preflight.outputs.needed == 'true' || vars.PUBLISH_GHCR == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    concurrency:
+      group: main-writer-${{ github.repository }}-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Commit version metadata and publish
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_CENTRAL: ${{ vars.PUBLISH_CENTRAL == 'true' }}
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          PUBLISH_GHCR: ${{ vars.PUBLISH_GHCR == 'true' }}
+        run: |
+          gh auth setup-git --hostname github.com
+          args=()
+          if [[ $PUBLISH_GHCR == true ]]; then args+=(--runtime "$RUNNER_TEMP/jvm-runtime.zip"); fi
+          python3 scripts/release.py release "${args[@]}"
+      - name: Share versioned runtime for native images
+        if: vars.PUBLISH_GHCR == 'true' && steps.release.outputs.tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kotlin-release-runtime
+          path: ${{ runner.temp }}/jvm-runtime.zip
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 3
+
+  image-preflight:
+    needs: release
+    if: vars.PUBLISH_GHCR == 'true' && needs.release.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    concurrency:
+      group: main-writer-${{ github.repository }}-main
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      needed: ${{ steps.check.outputs.needed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Probe GHCR access and check the existing manifest
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: python3 scripts/release.py image-preflight --tag "$TAG"
+
+  image-build:
+    needs: [release, image-preflight]
+    if: needs.image-preflight.outputs.needed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    concurrency:
+      group: check-${{ github.workflow }}-${{ github.ref }}-release-image-${{ matrix.arch }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kotlin-release-runtime
+          path: build/release
+      - run: unzip -q build/release/jvm-runtime.zip -d build/runtime
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=docker,dest=${{ runner.temp }}/image.tar
+          tags: kotlin-pipeline:release-${{ matrix.arch }}
+          cache-from: type=gha,scope=kotlin-${{ matrix.arch }}
+          cache-to: type=gha,scope=kotlin-${{ matrix.arch }},mode=max
+      - name: Smoke-test the versioned image
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker load --input "$RUNNER_TEMP/image.tar"
+          test "$(docker run --rm --network none "kotlin-pipeline:release-$ARCH" Ada)" = 'Hello, Ada!'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kotlin-image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/image.tar
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 3
+
+  image-publish:
+    needs: [release, image-build]
+    if: ${{ !cancelled() && needs.image-build.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: main-writer-${{ github.repository }}-main
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: kotlin-image-*
+          path: build/images
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Push platform images and publish a single manifest
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/publish-image.sh "$TAG"
+
+  image-verify:
+    needs: [release, image-preflight, image-publish]
+    if: >-
+      !cancelled() && needs.image-preflight.result == 'success' &&
+      (needs.image-publish.result == 'success' || needs.image-preflight.outputs.needed == 'false')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    concurrency:
+      group: check-${{ github.workflow }}-${{ github.ref }}-image-verify
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Inspect published manifest without registry credentials
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+        run: python3 scripts/release.py image-verify --tag "$TAG"
