@@ -113,6 +113,28 @@ def archive(directory, archive_path):
         raise RuntimeError(f"{archive_path.name} is empty or exceeds the 50 MiB release size budget")
 
 
+def stage_central_bundle(source, target, release_version):
+    with ZipFile(source) as repository, ZipFile(target, "w", ZIP_DEFLATED) as bundle:
+        names = {
+            name for name in repository.namelist()
+            if Path(name).parent.name == release_version and not name.endswith("/")
+        }
+        required = (".asc", ".md5", ".sha1")
+        optional = (".sha256", ".sha512")
+        artifacts = {name for name in names if not name.endswith(required + optional)}
+        if not any(name.endswith(".pom") for name in artifacts):
+            raise RuntimeError(f"No versioned Maven publications found for {release_version}")
+        for name in sorted(artifacts):
+            for entry in (name, *(name + suffix for suffix in required)):
+                if entry not in names:
+                    raise RuntimeError(f"Maven Central bundle is missing {entry}")
+                bundle.writestr(entry, repository.read(entry))
+            for suffix in optional:
+                entry = name + suffix
+                if entry in names:
+                    bundle.writestr(entry, repository.read(entry))
+
+
 def build_assets(target, release_version, folder):
     import hashlib
 
@@ -232,10 +254,12 @@ def ensure_central(tag, folder):
             )
         if not (folder / BUNDLE).exists():
             command("gh", "release", "download", tag, "--pattern", BUNDLE, "--dir", str(folder))
+        bundle = folder / "central-bundle.zip"
+        stage_central_bundle(folder / BUNDLE, bundle, tag[1:])
         attempt = folder / CENTRAL_ATTEMPT
         attempt.write_text(f"Attempted by {os.environ.get('GITHUB_RUN_ID', 'local run')}\n", encoding="utf-8")
         command("gh", "release", "upload", tag, str(attempt))
-        deployment = registries.upload_to_central(folder / BUNDLE, f"{os.environ['GITHUB_REPOSITORY']}-{tag}")
+        deployment = registries.upload_to_central(bundle, f"{os.environ['GITHUB_REPOSITORY']}-{tag}")
         print(f"Central accepted deployment {deployment}")
         receipt = folder / CENTRAL_ID
         receipt.write_text(deployment + "\n", encoding="utf-8")

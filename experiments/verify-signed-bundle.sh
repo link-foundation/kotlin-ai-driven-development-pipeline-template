@@ -11,8 +11,22 @@ SIGNING_KEY=$(gpg --homedir "$keyring" --armor --export-secret-keys)
 export SIGNING_KEY
 PYTHONPATH=scripts python3 -c 'from registries import check_signing; check_signing()'
 ./gradlew --no-daemon --console=plain publishAllPublicationsToBundleRepository
-for suffix in '' -jvm -js; do
-    name="kotlin-pipeline-example$suffix"
-    pom="build/maven-bundle/io/github/link-foundation/$name/0.0.0/$name-0.0.0.pom"
+PYTHONPATH=scripts python3 - "$keyring" <<'PY'
+from pathlib import Path
+import sys
+from zipfile import ZipFile
+
+from release import PROPERTIES, archive, stage_central_bundle, version
+
+scratch = Path(sys.argv[1])
+release_version = ".".join(map(str, version(PROPERTIES.read_text(encoding="utf-8"))))
+repository = scratch / "repository.zip"
+bundle = scratch / "central-bundle.zip"
+archive(Path("build/maven-bundle"), repository)
+stage_central_bundle(repository, bundle, release_version)
+with ZipFile(bundle) as publication:
+    publication.extractall(scratch / "bundle")
+PY
+while IFS= read -r -d '' pom; do
     gpg --homedir "$keyring" --verify "$pom.asc" "$pom"
-done
+done < <(find "$keyring/bundle" -type f -name '*.pom' -print0)

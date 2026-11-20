@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import ci
@@ -150,6 +151,34 @@ class RegistryTest(unittest.TestCase):
         with patch.object(registries, "central_state", return_value="PUBLISHED"), patch.object(registries, "request") as api:
             self.assertTrue(registries.activate_deployment("fixture"))
             api.assert_not_called()
+
+    def test_central_bundle_contains_only_versioned_signed_artifacts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            repository = Path(folder) / "repository.zip"
+            target = Path(folder) / "central.zip"
+            pom = "group/project/0.1.0/project-0.1.0.pom"
+            with ZipFile(repository, "w") as archive:
+                archive.writestr("group/project/maven-metadata.xml", "repository metadata")
+                archive.writestr(pom, "POM")
+                archive.writestr(pom + ".md5", "checksum")
+                archive.writestr(pom + ".sha1", "checksum")
+            with self.assertRaisesRegex(RuntimeError, "missing.*pom.asc"):
+                release.stage_central_bundle(repository, target, "0.1.0")
+            with ZipFile(repository, "a") as archive:
+                archive.writestr(pom + ".asc", "signature")
+                archive.writestr(pom + ".asc.sha1", "signature checksum")
+            release.stage_central_bundle(repository, target, "0.1.0")
+            with ZipFile(target) as bundle:
+                self.assertEqual(set(bundle.namelist()), {pom, pom + ".asc", pom + ".md5", pom + ".sha1"})
+
+    def test_ghcr_reports_private_token_scope_and_prevents_overwriting_single_arch(self):
+        with patch.object(registries, "request", return_value=(403, {}, b"")):
+            with self.assertRaisesRegex(RuntimeError, "Make the package public"):
+                registries.ghcr_platforms("example/project", "v0.1.0")
+        responses = [(200, {}, b'{"token":"fixture"}'), (200, {}, b'{"config":{}}')]
+        with patch.object(registries, "request", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "exists without a multi-platform index"):
+                registries.ghcr_platforms("example/project", "v0.1.0")
 
 
 if __name__ == "__main__":

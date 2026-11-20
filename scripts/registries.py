@@ -178,10 +178,13 @@ def ghcr_auth(repository, authenticated):
     if authenticated:
         actions = "pull,push"
         headers["Authorization"] = "Basic " + encode(os.environ["GITHUB_ACTOR"], os.environ["GH_TOKEN"])
-    token = require(
-        request(f"{GHCR}/token?{urlencode({'service': 'ghcr.io', 'scope': f'repository:{repository}:{actions}'})}",
-                headers=headers), {200}, "GHCR authorization",
+    response = request(
+        f"{GHCR}/token?{urlencode({'service': 'ghcr.io', 'scope': f'repository:{repository}:{actions}'})}",
+        headers=headers,
     )
+    if response[0] in {401, 403} and not authenticated:
+        raise RuntimeError("GHCR denies anonymous access. Make the package public in package settings.")
+    token = require(response, {200}, "GHCR authorization")
     yield {"Authorization": "Bearer " + json.loads(token)["token"]}
 
 
@@ -206,7 +209,10 @@ def ghcr_platforms(repository, tag, authenticated=False):
         return set()
     if response[0] in {401, 403} and not authenticated:
         raise RuntimeError("GHCR denies anonymous access. Make the package public in package settings.")
+    document = json.loads(require(response, {200}, "GHCR manifest visibility"))
+    if not document.get("manifests"):
+        raise RuntimeError(f"GHCR tag {tag} exists without a multi-platform index")
     return {
         f"{manifest['platform']['os']}/{manifest['platform']['architecture']}"
-        for manifest in json.loads(require(response, {200}, "GHCR manifest visibility")).get("manifests", [])
+        for manifest in document["manifests"]
     }

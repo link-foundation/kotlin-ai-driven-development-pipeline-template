@@ -75,15 +75,16 @@ detekt {
     source.setFrom(files("src", "examples"))
 }
 
-val javadocJar =
-    tasks.register<Jar>("javadocJar") {
-        archiveClassifier.set("javadoc")
-        from("README.md")
-    }
-
 publishing {
     publications.withType<MavenPublication>().configureEach {
-        artifact(javadocJar)
+        val publicationName = name
+        val documentationJar =
+            tasks.register<Jar>("${publicationName}JavadocJar") {
+                archiveAppendix.set(publicationName)
+                archiveClassifier.set("javadoc")
+                from("README.md")
+            }
+        artifact(documentationJar)
         pom {
             name.set("Kotlin pipeline example")
             description.set("Kotlin Multiplatform example for the AI-driven development pipeline template")
@@ -122,7 +123,7 @@ publishing {
 val signPublications = providers.environmentVariable("SIGNING_KEY")
 if (signPublications.isPresent) {
     signing {
-        useInMemoryPgpKeys(signPublications.get(), providers.environmentVariable("SIGNING_PASSWORD").orNull)
+        useInMemoryPgpKeys(signPublications.get(), providers.environmentVariable("SIGNING_PASSWORD").getOrElse(""))
         sign(publishing.publications)
     }
 }

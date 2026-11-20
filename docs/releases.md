@@ -23,13 +23,15 @@ Actions secrets. Enable the repository variable `PUBLISH_CENTRAL=true` before
 the first release you want to publish:
 
 - `CENTRAL_USERNAME` and `CENTRAL_PASSWORD` contain the Central Portal user token.
-- `SIGNING_KEY` contains an ASCII-armored PGP private key.
+- `SIGNING_KEY` contains an ASCII-armored PGP private key. Publish the
+  corresponding public key so Central can validate signatures.
 - `SIGNING_PASSWORD` contains its passphrase when applicable.
 
 The preflight uses a disposable, user-managed staging upload and verifies that
 the key can sign. The actual deployment validates namespace ownership and
 artifact signatures. The template uses Central's documented Portal token API
-and keeps credentials out of fork checks. The writer holds a draft GitHub
+and extracts the signed versioned files from the Maven repository archive for
+the upload. The writer holds a draft GitHub
 release while publishing to Central and verifies the common, JVM and JS
 coordinates anonymously before publishing the GitHub draft.
 
