@@ -6,7 +6,8 @@ Use it at the repository root or from an existing multi-language repository.
 
 ## Quick start
 
-Use this repository as a GitHub template or copy its files. Set the project name
+Copy these files into your repository. If GitHub template access has been
+enabled, you can also start with **Use this template**. Set the project name
 in [settings.gradle.kts](settings.gradle.kts), the Maven group in
 [gradle.properties](gradle.properties), and the POM metadata in
 [build.gradle.kts](build.gradle.kts) before the first release.
