@@ -2,8 +2,8 @@ rootProject.name = "kotlin-pipeline-example"
 
 pluginManagement {
     repositories {
-        gradlePluginPortal()
         mavenCentral()
+        gradlePluginPortal()
     }
 }
 

@@ -9,6 +9,6 @@ if ! command -v gitleaks >/dev/null; then
 fi
 gitleaks git --pre-commit --staged --redact --no-banner
 python3 scripts/ci.py files
-if git diff --cached --name-only --diff-filter=ACMR -- '*.kt' '*.kts' 'gradle.properties' 'gradle/**' 'gradle.lockfile' | grep -q .; then
+if ! git diff --cached --quiet --diff-filter=ACMR -- '*.kt' '*.kts' 'gradle.properties' 'gradle/**' 'gradle.lockfile'; then
     ./gradlew --console=plain ktlintCheck detekt compileTestKotlinJvm
 fi
